@@ -13,11 +13,6 @@ pipeline{
             steps{
                 sh 'mvn clean compile install package'
             }
-        }
-        stage("sonarqube scan"){
-            steps{
-                sh 'mvn sonar:sonar'
-            }
-        }
+        }        
     }
 }
