@@ -1,24 +1,34 @@
-pipeline{
+pipeline {
     agent any
     tools {
         maven 'M2_HOME'
     }
-    stages{
-       stage('Sonarqube scan') {
+    stages {
+        stage('Sonarqube scan') {
             steps {
-                withSonarQubeEnv('sonarQube') {
-                    sh 'mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=asiamahy2g_geo-app2'
+                script {
+                    def mavenHome = tool 'M2_HOME'
+                    withEnv(["PATH+MAVEN=${mavenHome}/bin"]) {
+                        withSonarQubeEnv('sonarQube') {
+                            sh 'mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=asiamahy2g_geo-app2'
+                        }
+                    }
                 }
             }
         }
-        stage('all maven commands'){
-            steps{
+        
+        stage('All Maven commands') {
+            steps {
                 sh 'mvn clean compile install package'
             }
         }
-        stage('upload artifact') {
-            steps{
-            sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://3.85.233.248:8081/artifactory/geoapp/"'
-        }       
+        
+        stage('Upload artifact') {
+            steps {
+                script {
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://3.85.233.248:8081/artifactory/geoapp/"'
+                }
+            }
+        }
     }
 }
