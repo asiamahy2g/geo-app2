@@ -11,6 +11,7 @@ pipeline {
                     sh 'pwd'
                     sh 'id'
                     sh "mkdir \$(date '+%Y%m%d_%H%M%S')"
+                    sh 'npm --version'
                 }
             }
         }
@@ -22,6 +23,7 @@ pipeline {
             steps {
                 script {
                     sh 'python3 --version'
+                    
                 }
             }
         }
