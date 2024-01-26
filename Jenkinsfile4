@@ -1,0 +1,48 @@
+pipeline {
+    agent any
+    tools {
+        maven 'M2_HOME'
+    }
+    stages {
+        stage('Sonarqube scan') {
+            agent {
+                docker {
+                    image 'maven:3-amazoncorretto-17-debian'
+                }
+            }
+            steps {
+                script {
+                    def mavenHome = tool 'M2_HOME'
+                    withEnv(["PATH+MAVEN=${mavenHome}/bin"]) {
+                        withSonarQubeEnv('sonarQube') {
+                            sh 'mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=asiamahy2g_geo-app2'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('All Maven commands') {
+            steps {
+                sh 'mvn clean compile install package'
+            }
+        }
+
+        stage('Upload artifact') {
+            steps {
+                script {
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://52.90.252.228:8081/artifactory/my-test-repo"'
+                }
+            }
+        }
+
+        stage('Transfer artifact to Ansible Server') {
+            steps {
+                script {
+                    // Replace '/home/ec2-user/ansible-dev/' with the appropriate directory on the Ansible server
+                    sshCommand remote: 'ansible', command: 'scp -o StrictHostKeyChecking=no target/bio*.jar /home/ec2-user/ansible-dev/'
+                }
+            }
+        }
+    }
+}
