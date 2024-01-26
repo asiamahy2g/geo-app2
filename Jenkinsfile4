@@ -36,12 +36,20 @@ pipeline {
             }
         }
 
-        stage('Transfer artifact to Ansible Server') {
+        stage('Stash Files') {
             steps {
-                script {
-                    // Replace '/home/ec2-user/ansible-dev/' with the appropriate directory on the Ansible server
-                    sh 'scp -o StrictHostKeyChecking=yes target/bio*.jar ec2-user@52.90.252.228:/home/ec2-user/ansible-dev/'
-                }
+                // Stash files in the Jenkins workspace
+                stash(name: 'myfiles', includes: 'target/bio*.jar')
+            }
+        }
+        stage('Transfer Files to Ansible Agent') {
+            agent {
+                label 'ansible' // Execute this stage on the "ansible" agent
+            }
+            steps {
+                // Unstash files on the "ansible" agent
+                unstash 'myfiles'
+                // Now you can use the transferred files on the agent
             }
         }
     }
