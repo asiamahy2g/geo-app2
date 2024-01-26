@@ -40,7 +40,7 @@ pipeline {
             steps {
                 script {
                     // Replace '/home/ec2-user/ansible-dev/' with the appropriate directory on the Ansible server
-                    sshCommand remote: 'ansible', command: 'scp -o StrictHostKeyChecking=no target/bio*.jar /home/ec2-user/ansible-dev/'
+                    sh 'scp -o StrictHostKeyChecking=no target/bio*.jar ec2-user@52.90.252.228:/home/ec2-user/ansible-dev/'
                 }
             }
         }
