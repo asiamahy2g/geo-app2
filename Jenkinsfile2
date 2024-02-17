@@ -27,7 +27,7 @@ pipeline {
         stage('Upload artifact') {
             steps {
                 script {
-                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://ec2-44-203-162-45.compute-1.amazonaws.com:8081/artifactory/geoapp/"'
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://18.212.40.66:8081/artifactory/geoapp/"'
                 }
             }
         }
