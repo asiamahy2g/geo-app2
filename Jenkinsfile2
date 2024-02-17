@@ -41,7 +41,6 @@ pipeline {
 
         stage('Push image') {
             steps {
-                sh 'docker tag geoapp:${BUILD_NUMBER} 540738452774.dkr.ecr.us-east-1.amazonaws.com/geoapp:${BUILD_NUMBER}'
                 sh 'docker push 540738452774.dkr.ecr.us-east-1.amazonaws.com/geoapp:${BUILD_NUMBER}'
             }
         }
