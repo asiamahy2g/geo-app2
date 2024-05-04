@@ -1,0 +1,57 @@
+pipeline {
+    agent any
+    tools {
+        maven 'M2_HOME'
+    }
+    stages {
+        stage('Sonarqube scan') {
+            agent {docker { image 'maven:3-amazoncorretto-17-debian' }}
+            steps {
+                script {
+                    def mavenHome = tool 'M2_HOME'
+                    withEnv(["PATH+MAVEN=${mavenHome}/bin"]) {
+                        withSonarQubeEnv('sonarQube') {
+                            sh 'mvn verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=asiamahy2g_geo-app2'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('All Maven commands') {
+            steps {
+                sh 'mvn clean compile install package'
+            }
+        }
+
+        stage('Upload artifact') {
+            steps {
+                script {
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -T target/bio*.jar "http://44.202.50.119:8081/artifactory/geoapp/"'
+                }
+            }
+        }
+
+        stage('Download artifact to Ansible server') {
+            agent {
+                label 'ansible'
+            }
+            steps {
+                script {
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -O "http://44.202.50.119:8081/artifactory/geoapp/bioMedical-0.0.7-SNAPSHOT.jar"'
+                }
+            }
+        }
+
+        stage('Run Ansible playbook') {
+            agent {
+                label 'ansible'
+            }
+            steps {
+                script {
+                    sh '/usr/bin/ansible-playbook /home/ec2-user/ansible-dev/biomedical_app.yml'
+                }
+            }
+        }
+    }
+}
