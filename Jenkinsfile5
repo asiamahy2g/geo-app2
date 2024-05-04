@@ -38,7 +38,7 @@ pipeline {
             }
             steps {
                 script {
-                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -O "http://44.202.50.119:8081/artifactory/geoapp/bioMedical-0.0.7-SNAPSHOT.jar"'
+                    sh 'curl -uadmin:AP4y6DmdHPZsNpu4PoxakusUxFz -O "http://44.202.50.119:8081/artifactory/geoapp/bioMedical-0.0.8-SNAPSHOT.jar"'
                 }
             }
         }
