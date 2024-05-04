@@ -49,7 +49,7 @@ pipeline {
             }
             steps {
                 script {
-                    sh 'timeout 1m ansible-playbook -i /home/ec2-user/ansible-dev/inventory.yml /home/ec2-user/ansible-dev/biomedical_app.yml'
+                    sh 'ansible-playbook -i /home/ec2-user/ansible-dev/inventory.yml /home/ec2-user/ansible-dev/biomedical_app.yml'
                 }
             }
         }
