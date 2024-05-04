@@ -49,7 +49,7 @@ pipeline {
             }
             steps {
                 script {
-                    sh '/usr/bin/ansible-playbook /home/ec2-user/ansible-dev/biomedical_app.yml'
+                    sh 'ansible-playbook /home/ec2-user/ansible-dev/biomedical_app.yml'
                 }
             }
         }
