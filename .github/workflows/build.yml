@@ -1,61 +1,188 @@
-name: Build and push image
+name: CI/CD
 
+# Pull requests: lint, build and test, code quality, image scan. Nothing is pushed or deployed.
+# Push to main: all of the above, then push the image to ECR and deploy (after approval).
 on:
   push:
     branches: [main]
     paths-ignore:
       - "**.md"
       - "img/**"
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: geoapp
+  HELM_VERSION: v3.22.1
+  SONAR_MAVEN_PLUGIN: org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751
 
 concurrency:
-  group: build-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  lint:
+    name: Lint (Dockerfile, Helm chart)
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.push.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint Helm chart
+        run: |
+          helm lint ./chart --strict
+          helm template geoapp ./chart > /dev/null
+
+  build-test:
+    name: Build and unit test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same Java version the container runs
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "11"
           cache: maven
 
-      # clean removes the old jar committed under target/, so the Dockerfile
-      # copies exactly one jar
-      - name: Build jar
-        run: mvn -B clean package
+      - name: Build, test, coverage report
+        run: mvn -B verify
+
+      - name: Keep build output for the next jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: build
+          retention-days: 1
+          path: |
+            target/*.jar
+            target/classes
+            target/test-classes
+            target/surefire-reports
+            target/site/jacoco/jacoco.xml
+
+  quality:
+    name: Code quality (SonarQube Cloud)
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # secretless SonarQube Cloud authentication
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # Sonar needs history to tell new code from old
+
+      # The scanner needs Java 17+; it analyzes the classes built on Java 11 above
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
+          path: target
+
+      - name: Cache SonarQube packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Get short-lived SonarQube Cloud token
+        id: sonar-auth
+        uses: SonarSource/sonarqube-auth-action@b372e2c2930aadfcc4f4399446da1e12772709ad # v1.2
+        with:
+          export-env: false # only the scan step gets the token
+
+      - name: Analyze and wait for quality gate
+        env:
+          SONAR_TOKEN: ${{ steps.sonar-auth.outputs.sonar-token }}
+        run: |
+          mvn -B "$SONAR_MAVEN_PLUGIN:sonar" \
+            -Dsonar.qualitygate.wait=true \
+            -Dsonar.qualitygate.timeout=300
+
+  image:
+    name: Image build, scan, push
+    needs: [lint, build-test, quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # AWS OIDC for the ECR push
+      security-events: write # Trivy results in the Security tab
+    outputs:
+      tag: ${{ steps.push.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
+          path: target
+
+      - name: Build image
+        run: docker build -t geoapp:ci .
+
+      # Report only for now: Spring Boot 2.2 has known CVEs. Make this blocking
+      # (exit-code: "1") once dependencies are upgraded.
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: geoapp:ci
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+        env:
+          TRIVY_DISABLE_VEX_NOTICE: "true"
+
+      - name: Upload scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-image
 
       - uses: aws-actions/configure-aws-credentials@v6
+        if: github.event_name != 'pull_request'
         with:
           role-to-assume: arn:aws:iam::540738452774:role/github-actions-geoapp-ecr-push
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to ECR
+        if: github.event_name != 'pull_request'
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push image
+      - name: Push image
+        if: github.event_name != 'pull_request'
         id: push
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           TAG="${GITHUB_SHA::7}"
           IMAGE="$REGISTRY/$ECR_REPOSITORY"
-          docker build -t "$IMAGE:$TAG" -t "$IMAGE:latest" .
+          docker tag geoapp:ci "$IMAGE:$TAG"
+          docker tag geoapp:ci "$IMAGE:latest"
           docker push "$IMAGE:$TAG"
           docker push "$IMAGE:latest"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -70,7 +197,11 @@ jobs:
   # Waits for approval in the geoapp-prod environment, then upgrades the cluster.
   # Skips cleanly if the cluster is not running.
   deploy:
-    needs: build
+    needs: image
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/deploy.yml
     with:
-      tag: ${{ needs.build.outputs.tag }}
+      tag: ${{ needs.image.outputs.tag }}
