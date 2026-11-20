@@ -2,7 +2,7 @@
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml"
   xmlns:th="http://www.thymeleaf.org">
 <head>
-	<title>Login</title>
+	<title>Patients Login</title>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 <!--===============================================================================================-->	
@@ -22,6 +22,7 @@
 <!--===============================================================================================-->
 	<link rel="stylesheet" type="text/css" href="login/css/util.css">
 	<link rel="stylesheet" type="text/css" href="login/css/main.css">
+	<link rel="stylesheet" type="text/css" href="login/css/custom.css">
 <!--===============================================================================================-->
 </head>
 <body>
@@ -31,8 +32,10 @@
 			<div class="wrap-login100 p-l-50 p-r-50 p-t-77 p-b-30">
 	<form class="login100-form validate-form"  th:action="@{/authenticateTheUser}"  method="POST">
 					
+					<img class="login-logo" src="login/images/hospital-logo.svg" alt="Hospital logo">
+
 					<span class="login100-form-title p-b-55">
-						User,Doctor & Admin Sign In
+						Patients Login
 					</span>
 
 					<div class="wrap-input100 validate-input m-b-16" data-validate = "Valid email is required: ex@abc.xyz">
