@@ -1,0 +1,123 @@
+name: Deploy to EKS
+
+# Run by hand (Actions > Deploy to EKS > Run workflow), or called by the build
+# workflow after each push. Every run waits for approval in the geoapp-prod
+# environment before it touches the cluster.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (leave empty for the newest pushed image)"
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: geoapp
+  CLUSTER_PREFIX: manny-eks-
+  RELEASE: geoapp
+  NAMESPACE: default
+
+concurrency:
+  group: deploy-geoapp
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: geoapp-prod
+      url: ${{ steps.url.outputs.url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::540738452774:role/github-actions-geoapp-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find cluster
+        id: cluster
+        run: |
+          CLUSTERS=$(aws eks list-clusters --query "clusters[?starts_with(@, '${CLUSTER_PREFIX}')]" --output text)
+          COUNT=$(echo "$CLUSTERS" | wc -w)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::notice::No ${CLUSTER_PREFIX}* cluster is running. Skipping deploy. Run this workflow again after the cluster is up."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          elif [ "$COUNT" -gt 1 ]; then
+            echo "::error::More than one cluster found: $CLUSTERS"
+            exit 1
+          else
+            echo "Cluster: $CLUSTERS"
+            echo "name=$CLUSTERS" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve image tag
+        id: tag
+        if: steps.cluster.outputs.found == 'true'
+        env:
+          REQUESTED: ${{ inputs.tag }}
+        run: |
+          TAG="$REQUESTED"
+          if [ -z "$TAG" ]; then
+            # Newest pushed image, using its commit tag rather than "latest"
+            TAG=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --filter tagStatus=TAGGED \
+              --query "sort_by(imageDetails,&imagePushedAt)[-1].imageTags[?@ != 'latest'] | [0]" --output text)
+          fi
+          case "$TAG" in
+            ""|None) echo "::error::Could not work out which image to deploy."; exit 1 ;;
+            *[!A-Za-z0-9._-]*) echo "::error::Invalid tag: $TAG"; exit 1 ;;
+          esac
+          aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$TAG" >/dev/null \
+            || { echo "::error::Tag $TAG is not in ECR."; exit 1; }
+          echo "Deploying tag $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: azure/setup-helm@v5
+        if: steps.cluster.outputs.found == 'true'
+        with:
+          version: v3.22.1
+
+      - name: Helm upgrade
+        if: steps.cluster.outputs.found == 'true'
+        env:
+          CLUSTER: ${{ steps.cluster.outputs.name }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+          # --atomic rolls back to the previous release if the new pods don't become ready
+          helm upgrade --install "$RELEASE" ./chart \
+            --namespace "$NAMESPACE" \
+            --set image.tag="$TAG" \
+            --wait --atomic --timeout 10m
+          kubectl -n "$NAMESPACE" rollout status deployment/"$RELEASE" --timeout 2m
+
+      - name: App URL
+        id: url
+        if: steps.cluster.outputs.found == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          HOST=""
+          for i in $(seq 1 30); do
+            HOST=$(kubectl -n "$NAMESPACE" get svc "$RELEASE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "$HOST" ] && break
+            sleep 10
+          done
+          echo "url=http://$HOST" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Deployed geoapp:$TAG"
+            echo "App: http://$HOST"
+            echo ""
+            echo "A brand-new load balancer can take a few minutes before its DNS name resolves."
+          } >> "$GITHUB_STEP_SUMMARY"
